@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Hidden Katana</title>
+  <title>QR Card Battle — Referee</title>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   <style>
     :root {
@@ -641,44 +641,95 @@
     // ============================================================
     async function startCamera() {
       if (cameraActive) return;
-      try {
-        videoStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: false
-        });
-        video.srcObject = videoStream;
-        await video.play();
-        cameraActive = true;
-        scanning = true;
-        btnStartCam.textContent = "Camera On";
-        btnStartCam.disabled = true;
-        camStatus.textContent = "Scanning…";
-        requestAnimationFrame(scanLoop);
-        setMessage("Camera ready. Present cards.", "success");
-      } catch (err) {
-        camStatus.textContent = "Camera error";
-        setMessage("Camera permission denied or unavailable: " + err.message, "error");
+
+      // Try several constraint sets (desktop often has no "environment" camera)
+      const constraintSets = [
+        { video: { facingMode: "user" }, audio: false },
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false }
+      ];
+
+      let lastError = null;
+      for (const constraints of constraintSets) {
+        try {
+          videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+          break;
+        } catch (err) {
+          lastError = err;
+          videoStream = null;
+        }
       }
+
+      if (!videoStream) {
+        camStatus.textContent = "Camera error";
+        setMessage("Cannot access camera: " + (lastError ? lastError.message : "unknown"), "error");
+        return;
+      }
+
+      video.srcObject = videoStream;
+
+      // Wait until video has real dimensions
+      await new Promise((resolve, reject) => {
+        const onReady = () => {
+          video.removeEventListener("loadedmetadata", onReady);
+          resolve();
+        };
+        video.addEventListener("loadedmetadata", onReady);
+        // safety timeout
+        setTimeout(() => {
+          video.removeEventListener("loadedmetadata", onReady);
+          resolve();
+        }, 3000);
+      });
+
+      try {
+        await video.play();
+      } catch (playErr) {
+        setMessage("Video play failed: " + playErr.message, "error");
+        return;
+      }
+
+      cameraActive = true;
+      scanning = true;
+      btnStartCam.textContent = "Camera On";
+      btnStartCam.disabled = true;
+      camStatus.textContent = "Scanning… (hold QR steady)";
+      setMessage("Camera ready. Point a QR code at the camera.", "success");
+      requestAnimationFrame(scanLoop);
     }
 
+    let frameCount = 0;
     function scanLoop() {
       if (!scanning || !cameraActive) return;
 
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      frameCount++;
+      if (frameCount % 30 === 0) {
+        // light live indicator every ~0.5 s
+        camStatus.textContent = "Scanning… " + (video.videoWidth || 0) + "×" + (video.videoHeight || 0);
+      }
+
+      if (video.readyState >= video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+        // Downscale a bit for speed on mobile
+        const scale = Math.min(1, 640 / video.videoWidth);
+        const w = Math.floor(video.videoWidth * scale);
+        const h = Math.floor(video.videoHeight * scale);
+        canvas.width = w;
+        canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+
+        const imageData = ctx.getImageData(0, 0, w, h);
         const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: "dontInvert"
+          inversionAttempts: "attemptBoth"
         });
 
         if (code && code.data) {
           const now = Date.now();
           // Debounce same code
-          if (code.data !== lastScannedCode || now - lastScanTime > 1800) {
+          if (code.data !== lastScannedCode || now - lastScanTime > 1500) {
             lastScannedCode = code.data;
             lastScanTime = now;
+            camStatus.textContent = "Detected: " + code.data.substring(0, 12);
             handleScannedCode(code.data.trim());
           }
         }
