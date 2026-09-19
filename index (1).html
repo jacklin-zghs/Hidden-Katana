@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>QR Card Battle — Referee</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --accent: #3b82f6;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warn: #eab308;
+      --muted: #64748b;
+      --text: #e2e8f0;
+      --border: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+      color: #93c5fd;
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--panel);
+      padding: 8px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+
+    label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    select, button {
+      font-size: 0.95rem;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0f172a;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    select:focus, button:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    button {
+      background: var(--accent);
+      border-color: transparent;
+      font-weight: 600;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    button:hover {
+      background: #2563eb;
+    }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
+    button.secondary {
+      background: #334155;
+    }
+
+    button.secondary:hover {
+      background: #475569;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Camera */
+    .camera-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      aspect-ratio: 4/3;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      margin-bottom: 18px;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    #scanCanvas {
+      display: none;
+    }
+
+    .camera-status {
+      position: absolute;
+      bottom: 8px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      background: rgba(0,0,0,0.55);
+      padding: 4px;
+    }
+
+    /* Players grid */
+    #playersGrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 14px;
+      width: 100%;
+      max-width: 720px;
+      margin-bottom: 20px;
+    }
+
+    .player-slot {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .result-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      min-height: 1.2em;
+      text-transform: uppercase;
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+
+    .result-label.show {
+      opacity: 1;
+    }
+
+    .result-label.win { color: var(--success); }
+    .result-label.lose { color: var(--danger); }
+    .result-label.draw { color: var(--warn); }
+    .result-label.destroyed { color: #f97316; }
+
+    .player-square {
+      width: 100px;
+      height: 100px;
+      border-radius: 16px;
+      background: var(--panel);
+      border: 3px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+      user-select: none;
+    }
+
+    .player-square .num {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #94a3b8;
+      line-height: 1;
+    }
+
+    .player-square .status {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* States */
+    .player-square.waiting {
+      border-color: var(--border);
+    }
+
+    .player-square.recognized {
+      border-color: var(--success);
+      background: #14532d33;
+    }
+
+    .player-square.recognized .num {
+      color: var(--success);
+    }
+
+    .player-square.winner {
+      border-color: var(--success);
+      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.35);
+      background: #14532d55;
+    }
+
+    .player-square.loser {
+      border-color: var(--danger);
+      background: #7f1d1d33;
+    }
+
+    .player-square.draw {
+      border-color: var(--warn);
+      background: #713f1233;
+    }
+
+    .player-square.destroyed {
+      border-color: #f97316;
+      background: #7c2d1233;
+    }
+
+    /* Flash animation */
+    .player-square.flash {
+      animation: flashBorder 0.55s ease-out;
+    }
+
+    @keyframes flashBorder {
+      0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.9); border-color: #60a5fa; }
+      40%  { box-shadow: 0 0 0 12px rgba(59, 130, 246, 0); border-color: #93c5fd; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+
+    /* Message area */
+    #message {
+      min-height: 1.4em;
+      font-size: 0.95rem;
+      text-align: center;
+      color: #94a3b8;
+      margin-bottom: 12px;
+      max-width: 480px;
+    }
+
+    #message.error {
+      color: var(--danger);
+    }
+
+    #message.success {
+      color: var(--success);
+    }
+
+    /* Footer note */
+    .footer {
+      margin-top: auto;
+      padding-top: 16px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 420px;
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .player-square {
+        width: 88px;
+        height: 88px;
+      }
+      .player-square .num {
+        font-size: 1.7rem;
+      }
+      #playersGrid {
+        gap: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>QR CARD BATTLE</h1>
+  <p class="subtitle">Camera referee • Cards stay anonymous</p>
+
+  <div class="controls">
+    <div class="control-group">
+      <label for="numPlayers">Players</label>
+      <select id="numPlayers">
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+        <option value="9">9</option>
+      </select>
+    </div>
+    <button id="btnReset" class="secondary">RESET</button>
+    <button id="btnStartCam">Start Camera</button>
+  </div>
+
+  <div class="camera-wrap">
+    <video id="video" playsinline muted></video>
+    <canvas id="scanCanvas"></canvas>
+    <div class="camera-status" id="camStatus">Camera off</div>
+  </div>
+
+  <div id="message">Present cards in any order. Battle starts when all players are locked.</div>
+
+  <div id="playersGrid"></div>
+
+  <p class="footer">
+    Card format: GAMESET + Player# + ID e.g. <code>MIL1001</code><br>
+    Rules loaded from <code>rules.json</code> (fallback embedded).
+  </p>
+
+  <script>
+    // ============================================================
+    // CONFIG — easy to change
+    // ============================================================
+    const SOUND_URLS = {
+      // Replace these with your own short .mp3 / .ogg files later
+      recognize: null,   // e.g. "sounds/recognize.mp3"
+      result:    null,   // e.g. "sounds/result.mp3"
+      reset:     null    // e.g. "sounds/reset.mp3"
+    };
+
+    // ============================================================
+    // EMBEDDED FALLBACK RULES (used if rules.json is missing)
+    // ============================================================
+    const EMBEDDED_RULES = {
+      games: {
+        MIL: {
+          cards: {
+            "001": { rank: 1 },
+            "002": { rank: 2 },
+            "003": { rank: 3 },
+            "004": { rank: 4 },
+            "005": { rank: 5 },
+            "008": { rank: 8 },
+            "009": { rank: 9 }
+          },
+          rules: ["1 > 2", "2 > 3", "3 > 4", "4 > 5", "5 > 8", "8 > 9"],
+          special: [
+            ["003", "004", "draw"],
+            ["004", "*", "destroyed"],
+            ["008", "009", "a"],
+            ["009", "*", "destroyed"]
+          ]
+        },
+        RPS: {
+          cards: {
+            "001": { rank: 1 },
+            "002": { rank: 2 },
+            "003": { rank: 3 }
+          },
+          rules: [],
+          special: [
+            ["001", "002", "a"],
+            ["002", "003", "a"],
+            ["003", "001", "a"]
+          ]
+        },
+        MON: {
+          cards: {
+            "001": { rank: 1 },
+            "002": { rank: 2 },
+            "003": { rank: 3 },
+            "004": { rank: 4 }
+          },
+          rules: ["1 > 2", "2 > 3", "3 > 4"],
+          special: [
+            ["001", "004", "a"]
+          ]
+        }
+      }
+    };
+
+    // ============================================================
+    // STATE
+    // ============================================================
+    let rulesData = null;
+    let numPlayers = 2;
+    let players = [];          // [{ playerNum, cardId, localId, gameSet, rank, locked, status }]
+    let cameraActive = false;
+    let scanning = false;
+    let battleResolved = false;
+    let lastScannedCode = "";
+    let lastScanTime = 0;
+    let audioCtx = null;
+    let videoStream = null;
+
+    // ============================================================
+    // DOM
+    // ============================================================
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("scanCanvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const camStatus = document.getElementById("camStatus");
+    const playersGrid = document.getElementById("playersGrid");
+    const messageEl = document.getElementById("message");
+    const numPlayersSelect = document.getElementById("numPlayers");
+    const btnReset = document.getElementById("btnReset");
+    const btnStartCam = document.getElementById("btnStartCam");
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    async function init() {
+      await loadRules();
+      rebuildPlayers();
+      numPlayersSelect.addEventListener("change", onNumPlayersChange);
+      btnReset.addEventListener("click", resetRound);
+      btnStartCam.addEventListener("click", startCamera);
+
+      // First user interaction unlocks audio
+      document.body.addEventListener("click", initAudio, { once: true });
+      document.body.addEventListener("touchstart", initAudio, { once: true });
+    }
+
+    async function loadRules() {
+      try {
+        const res = await fetch("rules.json", { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        rulesData = await res.json();
+        setMessage("Rules loaded from rules.json", "success");
+      } catch (e) {
+        rulesData = EMBEDDED_RULES;
+        setMessage("Using embedded rules (rules.json not found)", "");
+      }
+    }
+
+    function onNumPlayersChange() {
+      const n = parseInt(numPlayersSelect.value, 10);
+      if (n === numPlayers) return;
+      numPlayers = n;
+      rebuildPlayers();
+      setMessage(`Set to ${numPlayers} players. Present cards.`, "");
+    }
+
+    function rebuildPlayers() {
+      players = [];
+      for (let i = 1; i <= numPlayers; i++) {
+        players.push({
+          playerNum: i,
+          cardId: null,
+          localId: null,
+          gameSet: null,
+          rank: null,
+          locked: false,
+          status: "waiting"   // waiting | recognized | winner | loser | draw | destroyed
+        });
+      }
+      battleResolved = false;
+      renderPlayers();
+    }
+
+    // ============================================================
+    // RENDER
+    // ============================================================
+    function renderPlayers() {
+      playersGrid.innerHTML = "";
+      players.forEach(p => {
+        const slot = document.createElement("div");
+        slot.className = "player-slot";
+        slot.dataset.player = p.playerNum;
+
+        const label = document.createElement("div");
+        label.className = "result-label";
+        label.id = `label-${p.playerNum}`;
+
+        const square = document.createElement("div");
+        square.className = `player-square ${p.status}`;
+        square.id = `square-${p.playerNum}`;
+
+        const num = document.createElement("div");
+        num.className = "num";
+        num.textContent = p.playerNum;
+
+        const st = document.createElement("div");
+        st.className = "status";
+        st.textContent = statusText(p.status);
+
+        square.appendChild(num);
+        square.appendChild(st);
+        slot.appendChild(label);
+        slot.appendChild(square);
+        playersGrid.appendChild(slot);
+      });
+    }
+
+    function statusText(s) {
+      switch (s) {
+        case "waiting": return "Waiting";
+        case "recognized": return "Locked";
+        case "winner": return "Winner";
+        case "loser": return "Loser";
+        case "draw": return "Draw";
+        case "destroyed": return "Destroyed";
+        default: return s;
+      }
+    }
+
+    function updatePlayerUI(p) {
+      const square = document.getElementById(`square-${p.playerNum}`);
+      const label = document.getElementById(`label-${p.playerNum}`);
+      if (!square) return;
+
+      square.className = `player-square ${p.status}`;
+      square.querySelector(".status").textContent = statusText(p.status);
+
+      // Result label above
+      label.className = "result-label";
+      if (battleResolved) {
+        if (p.status === "winner") {
+          label.textContent = "WIN";
+          label.classList.add("win", "show");
+        } else if (p.status === "loser") {
+          label.textContent = "LOSE";
+          label.classList.add("lose", "show");
+        } else if (p.status === "draw") {
+          label.textContent = "DRAW";
+          label.classList.add("draw", "show");
+        } else if (p.status === "destroyed") {
+          label.textContent = "DESTROYED";
+          label.classList.add("destroyed", "show");
+        } else {
+          label.textContent = "";
+          label.classList.remove("show");
+        }
+      } else {
+        label.textContent = "";
+        label.classList.remove("show");
+      }
+    }
+
+    function flashPlayer(playerNum) {
+      const square = document.getElementById(`square-${playerNum}`);
+      if (!square) return;
+      square.classList.remove("flash");
+      void square.offsetWidth; // reflow
+      square.classList.add("flash");
+    }
+
+    function setMessage(text, type = "") {
+      messageEl.textContent = text;
+      messageEl.className = type ? type : "";
+    }
+
+    // ============================================================
+    // AUDIO (simple synthesized sounds — replaceable by URLs)
+    // ============================================================
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    }
+
+    function playTone(freq, duration, type = "sine", volume = 0.15) {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.value = volume;
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    function playRecognize() {
+      if (SOUND_URLS.recognize) {
+        const a = new Audio(SOUND_URLS.recognize);
+        a.play().catch(() => {});
+      } else {
+        playTone(880, 0.12, "square", 0.12);
+        setTimeout(() => playTone(1175, 0.15, "square", 0.1), 90);
+      }
+    }
+
+    function playResult() {
+      if (SOUND_URLS.result) {
+        const a = new Audio(SOUND_URLS.result);
+        a.play().catch(() => {});
+      } else {
+        playTone(523, 0.1);
+        setTimeout(() => playTone(659, 0.1), 100);
+        setTimeout(() => playTone(784, 0.25), 200);
+      }
+    }
+
+    function playReset() {
+      if (SOUND_URLS.reset) {
+        const a = new Audio(SOUND_URLS.reset);
+        a.play().catch(() => {});
+      } else {
+        playTone(400, 0.08, "triangle", 0.1);
+        setTimeout(() => playTone(300, 0.12, "triangle", 0.08), 80);
+      }
+    }
+
+    // ============================================================
+    // CAMERA + QR
+    // ============================================================
+    async function startCamera() {
+      if (cameraActive) return;
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+        video.srcObject = videoStream;
+        await video.play();
+        cameraActive = true;
+        scanning = true;
+        btnStartCam.textContent = "Camera On";
+        btnStartCam.disabled = true;
+        camStatus.textContent = "Scanning…";
+        requestAnimationFrame(scanLoop);
+        setMessage("Camera ready. Present cards.", "success");
+      } catch (err) {
+        camStatus.textContent = "Camera error";
+        setMessage("Camera permission denied or unavailable: " + err.message, "error");
+      }
+    }
+
+    function scanLoop() {
+      if (!scanning || !cameraActive) return;
+
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert"
+        });
+
+        if (code && code.data) {
+          const now = Date.now();
+          // Debounce same code
+          if (code.data !== lastScannedCode || now - lastScanTime > 1800) {
+            lastScannedCode = code.data;
+            lastScanTime = now;
+            handleScannedCode(code.data.trim());
+          }
+        }
+      }
+      requestAnimationFrame(scanLoop);
+    }
+
+    // ============================================================
+    // CARD HANDLING
+    // ============================================================
+    function handleScannedCode(raw) {
+      if (battleResolved) return; // ignore until reset
+
+      // Format: GAMESET (3) + PLAYER (1) + LOCALID
+      if (raw.length < 5) {
+        setMessage(`Invalid card ID (too short): ${raw}`, "error");
+        return;
+      }
+
+      const gameSet = raw.substring(0, 3).toUpperCase();
+      const playerChar = raw.charAt(3);
+      const localId = raw.substring(4);
+
+      if (!/^[1-9]$/.test(playerChar)) {
+        setMessage(`Invalid player number in card: ${raw}`, "error");
+        return;
+      }
+
+      const playerNum = parseInt(playerChar, 10);
+      if (playerNum > numPlayers) {
+        setMessage(`Player ${playerNum} is outside current setting (${numPlayers} players)`, "error");
+        return;
+      }
+
+      const player = players.find(p => p.playerNum === playerNum);
+      if (!player) return;
+
+      if (player.locked) {
+        // Stay locked — ignore further scans for this player
+        return;
+      }
+
+      // Validate game set exists
+      if (!rulesData.games[gameSet]) {
+        setMessage(`Unknown game set: ${gameSet}`, "error");
+        return;
+      }
+
+      const game = rulesData.games[gameSet];
+      if (!game.cards[localId]) {
+        setMessage(`Unknown card ${localId} in set ${gameSet}`, "error");
+        return;
+      }
+
+      // Accept & lock
+      player.cardId = raw;
+      player.localId = localId;
+      player.gameSet = gameSet;
+      player.rank = game.cards[localId].rank;
+      player.locked = true;
+      player.status = "recognized";
+
+      updatePlayerUI(player);
+      flashPlayer(playerNum);
+      playRecognize();
+      setMessage(`Player ${playerNum} locked`, "success");
+
+      // Check if all locked → battle
+      const lockedCount = players.filter(p => p.locked).length;
+      if (lockedCount === numPlayers) {
+        setTimeout(() => resolveBattle(), 450);
+      }
+    }
+
+    // ============================================================
+    // BATTLE ENGINE
+    // ============================================================
+    function resolveBattle() {
+      if (battleResolved) return;
+
+      // All must share the same game set
+      const sets = new Set(players.map(p => p.gameSet));
+      if (sets.size > 1) {
+        setMessage("Invalid matchup: cards from different game sets", "error");
+        players.forEach(p => {
+          p.status = "waiting"; // visual reset indicator
+          updatePlayerUI(p);
+        });
+        return;
+      }
+
+      const gameSet = players[0].gameSet;
+      const game = rulesData.games[gameSet];
+
+      // Pre-compute transitive rank map
+      const beats = buildTransitiveClosure(game.rules || []);
+
+      // Pairwise results
+      // resultMap[i][j] = "a" | "b" | "draw" | "destroyed"
+      // where "a" means players[i] wins vs players[j]
+      const n = players.length;
+      const pairwise = Array.from({ length: n }, () => Array(n).fill(null));
+
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const res = compareTwo(players[i], players[j], game, beats);
+          pairwise[i][j] = res;
+          // reverse perspective
+          if (res === "a") pairwise[j][i] = "b";
+          else if (res === "b") pairwise[j][i] = "a";
+          else pairwise[j][i] = res; // draw or destroyed
+        }
+      }
+
+      // Aggregate per player
+      // Priority: any destroyed → DESTROYED
+      // else if beats every other → WINNER
+      // else if loses to at least one → LOSER
+      // else → DRAW
+      for (let i = 0; i < n; i++) {
+        let hasDestroyed = false;
+        let winCount = 0;
+        let lossCount = 0;
+        let drawCount = 0;
+
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          const r = pairwise[i][j];
+          if (r === "destroyed") hasDestroyed = true;
+          else if (r === "a") winCount++;
+          else if (r === "b") lossCount++;
+          else drawCount++;
+        }
+
+        if (hasDestroyed) {
+          players[i].status = "destroyed";
+        } else if (winCount === n - 1) {
+          players[i].status = "winner";
+        } else if (lossCount > 0) {
+          players[i].status = "loser";
+        } else {
+          players[i].status = "draw";
+        }
+      }
+
+      battleResolved = true;
+      players.forEach(p => updatePlayerUI(p));
+      playResult();
+      setMessage("Battle resolved", "success");
+    }
+
+    /**
+     * Compare two players' cards.
+     * Returns: "a" (first wins), "b" (second wins), "draw", "destroyed"
+     */
+    function compareTwo(pA, pB, game, beats) {
+      const idA = pA.localId;
+      const idB = pB.localId;
+
+      // 1. Special rules first
+      const special = game.special || [];
+      for (const rule of special) {
+        const [c1, c2, outcome] = rule;
+
+        // Wildcard handling
+        const matchA = (c1 === idA || c1 === "*") && (c2 === idB || c2 === "*");
+        const matchB = (c1 === idB || c1 === "*") && (c2 === idA || c2 === "*");
+
+        if (matchA) {
+          if (outcome === "a") return "a";
+          if (outcome === "b") return "b";
+          if (outcome === "draw") return "draw";
+          if (outcome === "destroyed") return "destroyed";
+        }
+        if (matchB) {
+          // Flip orientation
+          if (outcome === "a") return "b";
+          if (outcome === "b") return "a";
+          if (outcome === "draw") return "draw";
+          if (outcome === "destroyed") return "destroyed";
+        }
+      }
+
+      // 2. Same rank → built-in draw
+      if (pA.rank === pB.rank) {
+        return "draw";
+      }
+
+      // 3. General rank relations (transitive)
+      const rA = String(pA.rank);
+      const rB = String(pB.rank);
+      if (beats[rA] && beats[rA].has(rB)) return "a";
+      if (beats[rB] && beats[rB].has(rA)) return "b";
+
+      // No relation defined → treat as draw
+      return "draw";
+    }
+
+    /**
+     * Build transitive closure from rules like ["1 > 2", "2 > 3"]
+     * Returns map: rank → Set of ranks it beats
+     */
+    function buildTransitiveClosure(ruleStrings) {
+      const graph = {}; // rank → set of directly beaten
+
+      ruleStrings.forEach(str => {
+        const m = str.match(/^\s*(\S+)\s*>\s*(\S+)\s*$/);
+        if (!m) return;
+        const a = m[1];
+        const b = m[2];
+        if (!graph[a]) graph[a] = new Set();
+        graph[a].add(b);
+      });
+
+      // Floyd-Warshall style transitive closure
+      const ranks = new Set();
+      Object.keys(graph).forEach(k => {
+        ranks.add(k);
+        graph[k].forEach(v => ranks.add(v));
+      });
+
+      const beats = {};
+      ranks.forEach(r => {
+        beats[r] = new Set(graph[r] || []);
+      });
+
+      // Repeated expansion until stable
+      let changed = true;
+      while (changed) {
+        changed = false;
+        ranks.forEach(a => {
+          const current = Array.from(beats[a]);
+          current.forEach(b => {
+            if (beats[b]) {
+              beats[b].forEach(c => {
+                if (!beats[a].has(c)) {
+                  beats[a].add(c);
+                  changed = true;
+                }
+              });
+            }
+          });
+        });
+      }
+
+      return beats;
+    }
+
+    // ============================================================
+    // RESET
+    // ============================================================
+    function resetRound() {
+      players.forEach(p => {
+        p.cardId = null;
+        p.localId = null;
+        p.gameSet = null;
+        p.rank = null;
+        p.locked = false;
+        p.status = "waiting";
+      });
+      battleResolved = false;
+      lastScannedCode = "";
+      players.forEach(p => updatePlayerUI(p));
+      playReset();
+      setMessage("Round reset. Present new cards.", "");
+    }
+
+    // ============================================================
+    // BOOT
+    // ============================================================
+    init();
+  </script>
+</body>
+</html>
